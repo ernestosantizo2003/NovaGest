@@ -1,0 +1,4 @@
+-- Linea base del esquema de NovaGest.
+-- No crea tablas: deja registrada la primera version en flyway_schema_history.
+-- Las tablas del modelo de datos entran en migraciones siguientes (V2 en adelante),
+-- escritas y revisadas segun el acuerdo con el equipo de DBA (tarjeta P2).

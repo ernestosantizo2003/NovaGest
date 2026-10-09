@@ -1,0 +1,8 @@
+# Nunca entran a la imagen: secretos, compilados locales y archivos del IDE
+.env
+*.env.local
+target/
+.git/
+.idea/
+.vscode/
+docs/

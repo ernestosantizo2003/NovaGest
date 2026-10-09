@@ -17,6 +17,12 @@ Documentacion y tablero: Notion, pagina NovaGest.
 ```
 En Windows (PowerShell): `.\mvnw.cmd clean verify`
 
+Levantar app y base juntas (requiere `.env` completo):
+```
+docker compose up --build    # app en http://localhost:8080, base en el puerto DB_PORT
+docker compose down          # detiene; agregar -v borra tambien los datos de la base
+```
+
 ## Configuracion
 Copiar `.env.example` a `.env` y completar. Los secretos entran solo por variables de entorno; `.env` esta en `.gitignore`.
 

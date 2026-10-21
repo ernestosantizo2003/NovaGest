@@ -17,7 +17,9 @@ import Cargando from '../componentes/Cargando'
 import { useDatos } from '../componentes/useDatos'
 import { useTitulo } from '../componentes/useTitulo'
 import { fechaHora, numero, soloFecha } from '../formato'
+import { rutaInternaSegura } from '../paginas/formularios'
 import NoEncontrado from '../paginas/NoEncontrado'
+import SeccionPago from '../pagos/SeccionPago'
 import { useSesion } from '../sesion/contexto'
 import { presentacionDe, resultadoDe } from './acciones'
 import { cargarTramiteConTipo, idDeRuta, puedeEditarDatos } from './cargas'
@@ -41,7 +43,13 @@ function valorLegible(campo: CampoTipo, datos: DatosTramite): string {
 function Detalle({ id }: { id: number }) {
   const { perfil, tienePermiso } = useSesion()
   const ubicacion = useLocation()
-  const avisoDeNavegacion = (ubicacion.state as { aviso?: string } | null)?.aviso
+  const estadoDeNavegacion = ubicacion.state as { aviso?: string; desde?: unknown } | null
+  const avisoDeNavegacion = estadoDeNavegacion?.aviso
+  // Vuelve a donde estaba la persona (la bandeja o la lista con sus filtros); solo rutas internas
+  const volver = rutaInternaSegura(estadoDeNavegacion?.desde, '/tramites')
+  const textoVolver = volver.startsWith('/bandeja')
+    ? '← Volver a la bandeja'
+    : '← Volver a los trámites'
   useTitulo(`Trámite #${id}`)
 
   const carga = useDatos(String(id), (senal) => cargarTramiteConTipo(id, senal))
@@ -105,7 +113,7 @@ function Detalle({ id }: { id: number }) {
   return (
     <>
       <p>
-        <Link to="/tramites">← Volver a los trámites</Link>
+        <Link to={volver}>{textoVolver}</Link>
       </p>
       <div className="encabezado-pagina encabezado-con-accion">
         <div>
@@ -210,6 +218,8 @@ function Detalle({ id }: { id: number }) {
         )}
         {Boolean(errorAccion) && <AvisoError error={errorAccion} />}
       </section>
+
+      <SeccionPago tramite={tramite} tipo={tipo} />
 
       <section className="tarjeta seccion" aria-labelledby="titulo-historial">
         <h2 id="titulo-historial">Historial</h2>

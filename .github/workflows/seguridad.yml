@@ -39,12 +39,17 @@ jobs:
       # guardaria primero una cache incompleta que ci.yml reutilizaria sin los jar.
       # trivy lee las dependencias transitivas (Jackson, Tomcat...) de los pom que haya en ~/.m2. En un runner
       # nuevo no hay ninguno y solo ve las directas: el escaneo salia limpio con 5 CVE altas de Jackson. Resolver
-      # el arbol baja esos pom (no compila ni corre pruebas).
+      # el arbol baja esos pom (no compila ni corre pruebas). Se resuelven todos los pom versionados: uno que
+      # quedara fuera de una lista escrita a mano se escanearia sin sus transitivas y sin ningun aviso.
       - name: Resolver las dependencias para trivy
         run: |
-          chmod +x mvnw docs/ejemplo-jwt/mvnw
-          ./mvnw -B -q dependency:tree -DoutputFile=target/arbol.txt
-          ./docs/ejemplo-jwt/mvnw -B -q -f docs/ejemplo-jwt/pom.xml dependency:tree -DoutputFile=target/arbol.txt
+          chmod +x mvnw
+          poms=$(git ls-files -- ':(glob)**/pom.xml')
+          test -n "$poms"
+          for pom in $poms; do
+            echo "Resolviendo $pom"
+            ./mvnw -B -q -f "$pom" dependency:tree -DoutputFile=target/arbol.txt
+          done
       - name: trivy (HIGH y CRITICAL con parche disponible)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

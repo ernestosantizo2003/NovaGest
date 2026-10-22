@@ -21,6 +21,9 @@ export const ITEMS_MENU: ItemMenu[] = [
   { ruta: '/panel', etiqueta: 'Mi panel', requiereSesion: true },
   { ruta: '/bandeja', etiqueta: 'Bandeja', permiso: 'tramite:leer', alcanceTotal: true },
   { ruta: '/tramites', etiqueta: 'Trámites', permiso: 'tramite:leer' },
+  { ruta: '/tipos', etiqueta: 'Tipos de trámite', permiso: 'tipo_tramite:editar' },
+  { ruta: '/usuarios', etiqueta: 'Usuarios', permiso: 'usuario:leer' },
+  { ruta: '/roles', etiqueta: 'Roles', permiso: 'rol:leer' },
 ]
 
 interface Contexto {

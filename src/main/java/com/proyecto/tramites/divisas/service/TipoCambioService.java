@@ -44,6 +44,9 @@ public class TipoCambioService {
 	/** NUMERIC(18,6): 6 decimales y 12 digitos antes del punto. */
 	private static final int DECIMALES = 6;
 	private static final int MAX_ENTEROS = 12;
+	/** Limites originales que HALF_UP convierte en un NUMERIC(18,6) positivo representable. */
+	private static final BigDecimal MIN_VENTA = new BigDecimal("0.0000005");
+	private static final BigDecimal MAX_VENTA_EXCLUSIVA = new BigDecimal("999999999999.9999995");
 
 	private final TipoCambioRepository tipos;
 	private final BanguatClient banguat;
@@ -113,12 +116,13 @@ public class TipoCambioService {
 	/**
 	 * La fila con la venta redondeada como la guarda NUMERIC(18,6): PostgreSQL redondea la mitad alejandose de cero,
 	 * igual que HALF_UP. Se valida y se guarda ese valor; validar el original dejaba pasar ventas que al redondear quedan
-	 * en cero (0.0000004) o con 13 enteros (999999999999.9999995), y la base las rechazaba. Un valor que ya no cabe no se
-	 * redondea (un exponente enorme haria costoso setScale): esValida lo descarta igual.
+	 * en cero (0.0000004) o con 13 enteros (999999999999.9999995), y la base las rechazaba. Se comparan los limites antes de
+	 * setScale: exponentes extremos pueden desbordar precision - scale o hacer fallar el propio redondeo.
 	 */
 	private static CotizacionMoneda comoSeGuarda(CotizacionMoneda fila) {
-		if (fila == null || fila.venta() == null || enteros(fila.venta()) > MAX_ENTEROS) {
-			return fila;
+		if (fila == null || fila.venta() == null || fila.venta().compareTo(MIN_VENTA) < 0
+				|| fila.venta().compareTo(MAX_VENTA_EXCLUSIVA) >= 0) {
+			return null;
 		}
 		return new CotizacionMoneda(fila.moneda(), fila.fecha(), fila.venta().setScale(DECIMALES, RoundingMode.HALF_UP),
 				fila.compra());
@@ -143,7 +147,10 @@ public class TipoCambioService {
 
 	/** Inserta de forma idempotente (ver {@link TipoCambioRepository#insertarSiNoExiste}): nunca choca con otra escritura. */
 	private void guardar(List<CotizacionMoneda> filas) {
-		for (CotizacionMoneda fila : filas) {
+		// El mismo orden de claves evita interbloqueos si dos rangos traen las mismas filas en orden inverso.
+		List<CotizacionMoneda> ordenadas = filas.stream().sorted(Comparator.comparing(CotizacionMoneda::fecha)
+				.thenComparingInt(CotizacionMoneda::moneda)).toList();
+		for (CotizacionMoneda fila : ordenadas) {
 			tipos.insertarSiNoExiste(fila.fecha(), fila.moneda(), fila.venta(), FUENTE);
 		}
 	}

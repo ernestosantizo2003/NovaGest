@@ -97,7 +97,7 @@ public class BanguatClient {
 		validarRango(desde, hasta);
 		Document doc = llamar("TipoCambioRango",
 				"<fechainit>" + FECHA.format(desde) + "</fechainit><fechafin>" + FECHA.format(hasta) + "</fechafin>");
-		return filas(doc, "Var", BanguatClient::cotizacion);
+		return filas(doc, "Var", BanguatClient::cotizacion, true);
 	}
 
 	/** Otra moneda entre dos fechas, incluidas (TipoCambioRangoMoneda). Omite dias sin cotizacion. */
@@ -108,7 +108,7 @@ public class BanguatClient {
 		}
 		Document doc = llamar("TipoCambioRangoMoneda", "<fechainit>" + FECHA.format(desde) + "</fechainit><fechafin>"
 				+ FECHA.format(hasta) + "</fechafin><moneda>" + moneda + "</moneda>");
-		return filas(doc, "Var", BanguatClient::cotizacion);
+		return filas(doc, "Var", BanguatClient::cotizacion, true);
 	}
 
 	/** Monedas que publica el Banguat, incluidas las que ya no existen (VariablesDisponibles). */
@@ -231,10 +231,26 @@ public class BanguatClient {
 	}
 
 	private static <T> List<T> filas(Document doc, String etiqueta, Function<Element, T> convertir) {
+		return filas(doc, etiqueta, convertir, false);
+	}
+
+	/** En un rango, una fila ilegible no invalida las otras. XML mal formado y fallas SOAP se rechazan antes. */
+	private static <T> List<T> filas(Document doc, String etiqueta, Function<Element, T> convertir,
+			boolean omitirInvalidas) {
 		NodeList nodos = doc.getElementsByTagNameNS(ESPACIO, etiqueta);
 		List<T> resultado = new ArrayList<>(nodos.getLength());
 		for (int i = 0; i < nodos.getLength(); i++) {
-			resultado.add(convertir.apply((Element) nodos.item(i)));
+			try {
+				resultado.add(convertir.apply((Element) nodos.item(i)));
+			}
+			catch (BanguatException ex) {
+				if (!omitirInvalidas) {
+					throw ex;
+				}
+			}
+		}
+		if (resultado.size() < nodos.getLength()) {
+			LOG.warn("El Banguat envio {} filas de cotizacion ilegibles: se ignoran", nodos.getLength() - resultado.size());
 		}
 		return List.copyOf(resultado);
 	}

@@ -25,6 +25,9 @@ public interface TipoCambioRepository extends JpaRepository<TipoCambio, Long> {
 	int insertarSiNoExiste(@Param("fecha") LocalDate fecha, @Param("moneda") int moneda,
 			@Param("valor") BigDecimal valor, @Param("fuente") String fuente);
 
+	/** La fila guardada de esa fecha y moneda (el indice unico garantiza que hay a lo sumo una). */
+	Optional<TipoCambio> findByFechaAndMoneda(LocalDate fecha, int moneda);
+
 	/** El valor de esa fecha o, si no hay, el ultimo anterior (fines de semana, feriados o Banguat caido). */
 	Optional<TipoCambio> findFirstByMonedaAndFechaLessThanEqualOrderByFechaDesc(int moneda, LocalDate fecha);
 

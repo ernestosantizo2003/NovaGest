@@ -218,4 +218,60 @@ class TipoCambioGuardadoTests {
 				FECHA.minusDays(1))).isEqualByComparingTo("7.10");
 	}
 
+	// ---------- Se valida y se responde el valor como queda en NUMERIC(18,6) ----------
+
+	@Test
+	void unaVentaQueAlRedondearASeisDecimalesQuedaEnCeroSeDescartaYLaQueLlegaAlMinimoSeGuarda() {
+		elBanguatResponde(fila(USD, FECHA, "7.65"), fila(USD, FECHA.minusDays(1), "0.0000004"),
+				fila(USD, FECHA.minusDays(2), "0.0000005"));
+
+		Cotizacion cotizacion = servicio.obtener(Moneda.USD, FECHA);
+
+		assertThat(cotizacion.valor()).isEqualByComparingTo("7.65");
+		assertThat(jdbc.queryForList("SELECT fecha || '|' || valor FROM tipo_cambio ORDER BY fecha", String.class))
+				.containsExactly("2026-09-29|0.000001", "2026-10-01|7.650000");
+	}
+
+	@Test
+	void unaVentaQueAlRedondearPasaDeDoceEnterosSeDescartaSinHacerFallarLasDemas() {
+		elBanguatResponde(fila(USD, FECHA, "7.65"), fila(USD, FECHA.minusDays(1), "999999999999.9999995"),
+				fila(USD, FECHA.minusDays(2), "999999999999.9999994"), fila(USD, FECHA.minusDays(3), "1E+999999999"));
+
+		Cotizacion cotizacion = servicio.obtener(Moneda.USD, FECHA);
+
+		assertThat(cotizacion.valor()).isEqualByComparingTo("7.65");
+		assertThat(jdbc.queryForList("SELECT fecha || '|' || valor FROM tipo_cambio ORDER BY fecha", String.class))
+				.containsExactly("2026-09-29|999999999999.999999", "2026-10-01|7.650000");
+	}
+
+	@Test
+	void unaVentaConMasDeSeisDecimalesSeRespondeRedondeadaComoLaGuardaLaBase() {
+		// La mitad se redondea alejandose de cero, como PostgreSQL (HALF_EVEN daria 7.654322)
+		elBanguatResponde(fila(USD, FECHA, "7.6543225"));
+
+		Cotizacion primera = servicio.obtener(Moneda.USD, FECHA);
+		Cotizacion desdeLaBase = servicio.obtener(Moneda.USD, FECHA);
+
+		assertThat(jdbc.queryForObject("SELECT valor FROM tipo_cambio WHERE fecha = ?", BigDecimal.class, FECHA))
+				.isEqualByComparingTo("7.654323");
+		assertThat(primera.valor()).isEqualByComparingTo("7.654323");
+		assertThat(desdeLaBase.valor()).isEqualTo(primera.valor());
+	}
+
+	@Test
+	void siLaUltimaCotizacionYaEstabaGuardadaSeRespondeLaGuardadaNoLaNuevaDelProveedor() {
+		// La fecha pedida no tiene fila: lo ultimo que trae el Banguat es de dos dias antes, ya guardado con otro valor
+		LocalDate anterior = FECHA.minusDays(2);
+		jdbc.update("INSERT INTO tipo_cambio (fecha, moneda, valor, fuente) VALUES (?, ?, 7.10, 'BANGUAT')", anterior,
+				USD);
+		elBanguatResponde(fila(USD, anterior, "7.99"));
+
+		Cotizacion cotizacion = servicio.obtener(Moneda.USD, FECHA);
+
+		assertThat(cotizacion.fecha()).isEqualTo(anterior);
+		assertThat(cotizacion.valor()).isEqualByComparingTo("7.10");
+		assertThat(cotizacion.estimado()).isFalse();
+		assertThat(filasGuardadas()).isEqualTo(1);
+	}
+
 }

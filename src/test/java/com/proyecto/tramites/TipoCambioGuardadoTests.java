@@ -15,10 +15,12 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -118,7 +120,7 @@ class TipoCambioGuardadoTests {
 		// La tarea diaria (otra transaccion) ya inserto la fila pero todavia no confirma
 		Future<?> tareaDiaria = hilos.submit(() -> transaccion.executeWithoutResult(estado -> {
 			jdbc.update("INSERT INTO tipo_cambio (fecha, moneda, valor, fuente) VALUES (?, ?, ?, 'BANGUAT')", FECHA,
-					USD, new BigDecimal("7.65"));
+					USD, new BigDecimal("7.10"));
 			insertada.countDown();
 			try {
 				soltar.await(20, TimeUnit.SECONDS);
@@ -137,7 +139,9 @@ class TipoCambioGuardadoTests {
 		tareaDiaria.get(10, TimeUnit.SECONDS);
 
 		Cotizacion cotizacion = peticion.get(20, TimeUnit.SECONDS);
-		assertThat(cotizacion.valor()).isEqualByComparingTo("7.65");
+		// El proveedor trae 7.65, pero la transaccion ganadora guardo 7.10.
+		assertThat(cotizacion.valor()).isEqualByComparingTo("7.10");
+		assertThat(servicio.obtener(Moneda.USD, FECHA).valor()).isEqualTo(cotizacion.valor());
 		assertThat(cotizacion.estimado()).isFalse();
 		assertThat(filasGuardadas()).isEqualTo(1);
 	}
@@ -160,6 +164,35 @@ class TipoCambioGuardadoTests {
 				assertThat(consulta.get(30, TimeUnit.SECONDS).valor()).as("ronda " + ronda).isEqualByComparingTo("7.65");
 			}
 			assertThat(filasGuardadas()).as("ronda " + ronda + ": una fila por fecha").isEqualTo(2);
+		}
+	}
+
+	@Test
+	void dosRangosSimultaneosEnOrdenInversoNoSeBloqueanMutuamente() throws Exception {
+		CyclicBarrier proveedorListo = new CyclicBarrier(2);
+		AtomicInteger consultas = new AtomicInteger();
+		CotizacionMoneda anterior = fila(USD, FECHA.minusDays(1), "7.64");
+		CotizacionMoneda actual = fila(USD, FECHA, "7.65");
+		when(banguat.tipoCambioRango(any(), any())).thenAnswer(invocacion -> {
+			int turno = consultas.getAndIncrement();
+			proveedorListo.await(10, TimeUnit.SECONDS);
+			return turno == 0 ? List.of(anterior, actual) : List.of(actual, anterior);
+		});
+		// Ensancha la ventana de carrera tras cada insercion, solo en la base aislada de esta prueba.
+		jdbc.execute("CREATE FUNCTION demorar_cotizacion_prueba() RETURNS trigger LANGUAGE plpgsql AS $$ "
+				+ "BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$");
+		jdbc.execute("CREATE TRIGGER demorar_cotizacion_prueba AFTER INSERT ON tipo_cambio "
+				+ "FOR EACH ROW EXECUTE FUNCTION demorar_cotizacion_prueba()");
+		try {
+			Future<Cotizacion> primera = hilos.submit(() -> servicio.obtener(Moneda.USD, FECHA));
+			Future<Cotizacion> segunda = hilos.submit(() -> servicio.obtener(Moneda.USD, FECHA));
+			assertThat(primera.get(20, TimeUnit.SECONDS).valor()).isEqualByComparingTo("7.65");
+			assertThat(segunda.get(20, TimeUnit.SECONDS).valor()).isEqualByComparingTo("7.65");
+			assertThat(filasGuardadas()).isEqualTo(2);
+		}
+		finally {
+			jdbc.execute("DROP TRIGGER demorar_cotizacion_prueba ON tipo_cambio");
+			jdbc.execute("DROP FUNCTION demorar_cotizacion_prueba()");
 		}
 	}
 
@@ -216,6 +249,64 @@ class TipoCambioGuardadoTests {
 		assertThat(filasGuardadas()).isEqualTo(2);
 		assertThat(jdbc.queryForObject("SELECT valor FROM tipo_cambio WHERE fecha = ?", BigDecimal.class,
 				FECHA.minusDays(1))).isEqualByComparingTo("7.10");
+	}
+
+	// ---------- Se valida y se responde el valor como queda en NUMERIC(18,6) ----------
+
+	@Test
+	void unaVentaQueAlRedondearASeisDecimalesQuedaEnCeroSeDescartaYLaQueLlegaAlMinimoSeGuarda() {
+		elBanguatResponde(fila(USD, FECHA, "7.65"), fila(USD, FECHA.minusDays(1), "0.0000004"),
+				fila(USD, FECHA.minusDays(2), "0.0000005"));
+
+		Cotizacion cotizacion = servicio.obtener(Moneda.USD, FECHA);
+
+		assertThat(cotizacion.valor()).isEqualByComparingTo("7.65");
+		assertThat(jdbc.queryForList("SELECT fecha || '|' || valor FROM tipo_cambio ORDER BY fecha", String.class))
+				.containsExactly("2026-09-29|0.000001", "2026-10-01|7.650000");
+	}
+
+	@Test
+	void unaVentaQueAlRedondearPasaDeDoceEnterosSeDescartaSinHacerFallarLasDemas() {
+		elBanguatResponde(fila(USD, FECHA, "7.65"), fila(USD, FECHA.minusDays(1), "999999999999.9999995"),
+				fila(USD, FECHA.minusDays(2), "999999999999.9999994"), fila(USD, FECHA.minusDays(3), "1E+999999999"),
+				fila(USD, FECHA.minusDays(4), "1E+2147483647"), fila(USD, FECHA.minusDays(5), "1E-2147483647"),
+				fila(USD, FECHA.minusDays(6), "-1E+2147483647"));
+
+		Cotizacion cotizacion = servicio.obtener(Moneda.USD, FECHA);
+
+		assertThat(cotizacion.valor()).isEqualByComparingTo("7.65");
+		assertThat(jdbc.queryForList("SELECT fecha || '|' || valor FROM tipo_cambio ORDER BY fecha", String.class))
+				.containsExactly("2026-09-29|999999999999.999999", "2026-10-01|7.650000");
+	}
+
+	@Test
+	void unaVentaConMasDeSeisDecimalesSeRespondeRedondeadaComoLaGuardaLaBase() {
+		// La mitad se redondea alejandose de cero, como PostgreSQL (HALF_EVEN daria 7.654322)
+		elBanguatResponde(fila(USD, FECHA, "7.6543225"));
+
+		Cotizacion primera = servicio.obtener(Moneda.USD, FECHA);
+		Cotizacion desdeLaBase = servicio.obtener(Moneda.USD, FECHA);
+
+		assertThat(jdbc.queryForObject("SELECT valor FROM tipo_cambio WHERE fecha = ?", BigDecimal.class, FECHA))
+				.isEqualByComparingTo("7.654323");
+		assertThat(primera.valor()).isEqualByComparingTo("7.654323");
+		assertThat(desdeLaBase.valor()).isEqualTo(primera.valor());
+	}
+
+	@Test
+	void siLaUltimaCotizacionYaEstabaGuardadaSeRespondeLaGuardadaNoLaNuevaDelProveedor() {
+		// La fecha pedida no tiene fila: lo ultimo que trae el Banguat es de dos dias antes, ya guardado con otro valor
+		LocalDate anterior = FECHA.minusDays(2);
+		jdbc.update("INSERT INTO tipo_cambio (fecha, moneda, valor, fuente) VALUES (?, ?, 7.10, 'BANGUAT')", anterior,
+				USD);
+		elBanguatResponde(fila(USD, anterior, "7.99"));
+
+		Cotizacion cotizacion = servicio.obtener(Moneda.USD, FECHA);
+
+		assertThat(cotizacion.fecha()).isEqualTo(anterior);
+		assertThat(cotizacion.valor()).isEqualByComparingTo("7.10");
+		assertThat(cotizacion.estimado()).isFalse();
+		assertThat(filasGuardadas()).isEqualTo(1);
 	}
 
 }

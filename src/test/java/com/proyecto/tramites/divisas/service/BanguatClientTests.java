@@ -26,6 +26,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Tarjeta 20: el cliente del Banguat se prueba con las respuestas reales grabadas en
@@ -252,6 +254,48 @@ class BanguatClientTests {
 		CotizacionMoneda viernes = cliente().tipoCambioRango(dia(1), dia(3)).get(1);
 
 		assertThat(viernes.venta()).isEqualTo(new BigDecimal("7.64136"));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "TipoCambioRango", "TipoCambioRangoMoneda" })
+	void lasFilasConCamposIlegiblesNoDescartanLasCotizacionesValidasDelRango(String operacion) {
+		String valida = "<Var><moneda>24</moneda><fecha>01/10/2026</fecha>"
+				+ "<venta>1.1234567</venta><compra>1.11</compra></Var>";
+		String numeroInvalido = valida.replace("1.1234567", "no-es-numero");
+		String fechaInvalida = valida.replace("01/10/2026", "fecha-ilegible");
+		String campoAusente = valida.replace("<venta>1.1234567</venta>", "");
+		guion.add(Respuesta.texto(200, BanguatClient.sobre(operacion + "Response",
+				numeroInvalido + valida + fechaInvalida + campoAusente)));
+
+		List<CotizacionMoneda> filas = operacion.equals("TipoCambioRango")
+				? cliente().tipoCambioRango(dia(1), dia(3)) : cliente().tipoCambioRangoMoneda(dia(1), dia(3), 24);
+
+		assertThat(filas).containsExactly(new CotizacionMoneda(24, dia(1), new BigDecimal("1.1234567"),
+				new BigDecimal("1.11")));
+		assertThat(recibidas).hasSize(1);
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "TipoCambioRango", "TipoCambioRangoMoneda" })
+	void sinFilasLegiblesDevuelveUnRangoVacioParaQueElServicioUseSuRespaldo(String operacion) {
+		guion.add(Respuesta.texto(200, BanguatClient.sobre(operacion + "Response",
+				"<Var><moneda>24</moneda><fecha>01/10/2026</fecha><venta>invalida</venta><compra>1</compra></Var>")));
+
+		List<CotizacionMoneda> filas = operacion.equals("TipoCambioRango")
+				? cliente().tipoCambioRango(dia(1), dia(3)) : cliente().tipoCambioRangoMoneda(dia(1), dia(3), 24);
+
+		assertThat(filas).isEmpty();
+		assertThat(recibidas).hasSize(1);
+	}
+
+	@Test
+	void laReferenciaDiariaIlegibleSigueSiendoUnaRespuestaInvalidaSinReintentos() {
+		guion.add(Respuesta.texto(200, BanguatClient.sobre("TipoCambioDiaResponse",
+				"<VarDolar><fecha>01/10/2026</fecha><referencia>invalida</referencia></VarDolar>")));
+
+		assertThatThrownBy(() -> cliente().tipoCambioDia()).isInstanceOf(BanguatException.class)
+				.satisfies(ex -> assertThat(((BanguatException) ex).esReintentable()).isFalse());
+		assertThat(recibidas).hasSize(1);
 	}
 
 }

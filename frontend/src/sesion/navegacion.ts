@@ -12,18 +12,21 @@ export interface ItemMenu {
 /**
  * Menú principal. Cada pantalla nueva agrega aquí una línea con la ruta que registra en App.tsx y el permiso que
  * la habilita. El menú solo es comodidad: ocultar un enlace no protege nada, la API vuelve a comprobar el
- * permiso en cada llamada. Ejemplos de lo que se agregará con las tarjetas 34 a 40:
- *   { ruta: '/pagos', etiqueta: 'Pagos', permiso: 'pago:leer' }
- *   { ruta: '/bitacora', etiqueta: 'Bitácora', permiso: 'bitacora:leer' }
+ * permiso en cada llamada. Ejemplo de una línea nueva:
+ *   { ruta: '/pagos', etiqueta: 'Pagos pendientes', permiso: 'pago:editar', alcanceTotal: true }
  */
 export const ITEMS_MENU: ItemMenu[] = [
   { ruta: '/', etiqueta: 'Inicio' },
   { ruta: '/panel', etiqueta: 'Mi panel', requiereSesion: true },
   { ruta: '/bandeja', etiqueta: 'Bandeja', permiso: 'tramite:leer', alcanceTotal: true },
+  { ruta: '/pagos', etiqueta: 'Pagos pendientes', permiso: 'pago:editar', alcanceTotal: true },
   { ruta: '/tramites', etiqueta: 'Trámites', permiso: 'tramite:leer' },
+  { ruta: '/ingresos', etiqueta: 'Mis ingresos', permiso: 'ingreso:leer' },
+  { ruta: '/divisas', etiqueta: 'Tipo de cambio', permiso: 'ingreso:leer' },
   { ruta: '/tipos', etiqueta: 'Tipos de trámite', permiso: 'tipo_tramite:editar' },
   { ruta: '/usuarios', etiqueta: 'Usuarios', permiso: 'usuario:leer' },
   { ruta: '/roles', etiqueta: 'Roles', permiso: 'rol:leer' },
+  { ruta: '/bitacora', etiqueta: 'Bitácora', permiso: 'bitacora:leer' },
 ]
 
 interface Contexto {

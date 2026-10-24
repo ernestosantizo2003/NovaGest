@@ -25,8 +25,15 @@ rm -f -- "/etc/nginx/snippets/novagest-$entorno-rutas.conf"
 if ! compgen -G "/etc/nginx/sites-enabled/novagest-*.conf" > /dev/null; then
     rm -f -- /etc/nginx/conf.d/novagest-rate-limit.conf \
              /etc/nginx/snippets/novagest-proxy-headers.conf \
-             /etc/systemd/system/nginx.service.d/novagest-espera-tailscale.conf
+             /etc/systemd/system/nginx.service.d/novagest-espera-tailscale.conf \
+             /etc/sysctl.d/60-novagest-nonlocal-bind.conf
     rmdir --ignore-fail-on-non-empty /etc/systemd/system/nginx.service.d 2>/dev/null || true
+    # Devolver el valor que tenía el servidor antes de NovaGest (lo guardó el instalador).
+    original=/root/novagest-respaldos/ip_nonlocal_bind.original
+    valor="$(cat "$original" 2>/dev/null || echo 0)"
+    [[ "$valor" =~ ^[01]$ ]] || valor=0
+    sysctl -q -w "net.ipv4.ip_nonlocal_bind=$valor"
+    rm -f -- "$original"
     systemctl daemon-reload
 fi
 

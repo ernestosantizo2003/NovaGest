@@ -52,6 +52,7 @@ dest_rutas="/etc/nginx/snippets/novagest-$entorno-rutas.conf"
 dest_snippet="/etc/nginx/snippets/novagest-proxy-headers.conf"
 dest_limite="/etc/nginx/conf.d/novagest-rate-limit.conf"
 dest_dropin="/etc/systemd/system/nginx.service.d/novagest-espera-tailscale.conf"
+dest_sysctl="/etc/sysctl.d/60-novagest-nonlocal-bind.conf"
 
 fallo() { echo "ERROR: $*" >&2; exit 1; }
 ok() { echo "OK: $*"; }
@@ -123,14 +124,21 @@ tar -czPf "$respaldo" /etc/nginx $( [[ -d /etc/systemd/system/nginx.service.d ]]
 ok "respaldo en $respaldo"
 
 nuevos=()
-for f in "$dest_sitio" "$link_sitio" "$dest_tunel" "$link_tunel" "$dest_rutas" "$dest_snippet" "$dest_limite" "$dest_dropin"; do
+for f in "$dest_sitio" "$link_sitio" "$dest_tunel" "$link_tunel" "$dest_rutas" "$dest_snippet" "$dest_limite" "$dest_dropin" "$dest_sysctl"; do
     [[ -e "$f" || -L "$f" ]] || nuevos+=("$f")
 done
+
+# ip_nonlocal_bind afecta a todo el servidor: se guarda el valor que tenía antes
+# de NovaGest (una sola vez) para que restaurar y la reversión lo devuelvan.
+bind_previo="$(sysctl -n net.ipv4.ip_nonlocal_bind)"
+valor_original="$respaldo_dir/ip_nonlocal_bind.original"
+[[ -e "$dest_sysctl" || -e "$valor_original" ]] || echo "$bind_previo" > "$valor_original"
 
 restaurar() {
     echo "Restaurando respaldo..." >&2
     for f in "${nuevos[@]}"; do rm -f -- "$f"; done
     tar -xzPf "$respaldo"
+    sysctl -q -w "net.ipv4.ip_nonlocal_bind=$bind_previo"
     systemctl daemon-reload
     nginx -t -q && echo "Configuracion anterior restaurada y valida." >&2
 }
@@ -146,6 +154,9 @@ if [[ $tunel -eq 1 ]]; then
 fi
 install -d -m 755 "$(dirname "$dest_dropin")"
 install -m 644 "$base_dir/systemd/novagest-espera-tailscale.conf" "$dest_dropin"
+# Escuchar en la IP de Tailscale aunque aún no exista (arranque sin internet).
+install -m 644 "$base_dir/sysctl/60-novagest-nonlocal-bind.conf" "$dest_sysctl"
+sysctl -q -p "$dest_sysctl"
 
 if ! nginx -t; then
     restaurar

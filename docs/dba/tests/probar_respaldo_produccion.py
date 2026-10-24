@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--pg-bin', type=Path, required=True)
     parser.add_argument('--bash', default=None)
     parser.add_argument('--solo-mocks', action='store_true', help='Sin servidor: permite comprobar modos POSIX en Linux')
+    parser.add_argument('--output', type=Path, help='JSON opcional; por defecto queda en el laboratorio temporal')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[3]
     bash = args.bash or (str(Path(os.environ.get('ProgramFiles', 'C:/Program Files')) / 'Git/bin/bash.exe')
@@ -192,9 +193,11 @@ pg_restore() {
         if started:
             run([binary('pg_ctl'), '-D', work / 'data', '-m', 'fast', '-w', 'stop'])
         result.update(total=len(cases), casos=cases, cluster_detenido=not (work / 'data/postmaster.pid').exists())
-        target = repo / 'target'; target.mkdir(exist_ok=True)
         name = 'resultado-respaldo-permisos-linux.json' if args.solo_mocks else 'resultado-respaldo-produccion.json'
-        (target / name).write_text(json.dumps(result, indent=2), 'utf-8')
+        output = args.output or work / name
+        output.parent.mkdir(parents=True, exist_ok=True)
+        result['evidencia_json'] = str(output)
+        output.write_text(json.dumps(result, indent=2), 'utf-8')
         print(json.dumps(result, indent=2))
 
 

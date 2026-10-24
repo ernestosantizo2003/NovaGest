@@ -1,0 +1,106 @@
+# Tarjeta 41: recorrido de humo de punta a punta con Playwright (navegador real + API real + base real).
+# Corre en cada pull request a develop que toque el frontend o el backend, y a mano desde "Actions".
+# Al inicio NO bloquea: no se marca como obligatorio en Settings > Rules. Si falla, sube el reporte con el trace.
+# Va aparte de ci.yml y frontend.yml para no tocar lo que ya corre.
+name: E2E
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'frontend/**'
+      - 'src/**'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  recorrido:
+    name: Recorrido de humo (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Descargar el codigo
+        uses: actions/checkout@v4
+
+      # Ninguna clave se escribe en el repositorio: se generan al azar en cada corrida y solo viven en este job.
+      - name: Generar el .env con claves de un solo uso
+        run: |
+          umask 077
+          DB_PASSWORD="$(openssl rand -hex 24)"
+          JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+          DEMO_PASSWORD="Demo-$(openssl rand -hex 12)"
+          echo "::add-mask::$DB_PASSWORD"
+          echo "::add-mask::$JWT_SECRET"
+          echo "::add-mask::$DEMO_PASSWORD"
+          {
+            echo "DB_NAME=novagest"
+            echo "DB_USER=novagest"
+            echo "DB_PASSWORD=$DB_PASSWORD"
+            echo "JWT_SECRET=$JWT_SECRET"
+            echo "SPRING_PROFILES_ACTIVE=dev"
+            echo "DEMO_PASSWORD=$DEMO_PASSWORD"
+            echo "CORS_ORIGINS=http://localhost:5173"
+          } > .env
+          echo "DEMO_PASSWORD=$DEMO_PASSWORD" >> "$GITHUB_ENV"
+
+      # Perfil dev: carga los usuarios demo de la tarjeta 24 (el gestor del recorrido).
+      - name: Levantar la base y la API con docker compose
+        run: docker compose up -d --build
+
+      - name: Esperar a que la API responda
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/actuator/health | grep -q '"UP"'; then
+              echo "API lista"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "La API no respondio a tiempo"
+          docker compose logs app
+          exit 1
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias del frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Instalar Chromium para Playwright
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Correr el recorrido
+        working-directory: frontend
+        run: npm run e2e
+
+      - name: Guardar el reporte de Playwright si algo falla
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-playwright
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Mostrar el registro de la API si algo falla
+        if: failure()
+        run: docker compose logs app
+
+      - name: Apagar y borrar los contenedores
+        if: always()
+        run: docker compose down -v

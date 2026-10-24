@@ -6,12 +6,14 @@ on:
       - 'docs/dba/scripts/**'
       - 'docs/dba/tests/**'
       - '.github/workflows/pruebas-dba.yml'
+      - 'deploy/adrian/server/tramites-ctl'
   push:
     branches: [develop, main]
     paths:
       - 'docs/dba/scripts/**'
       - 'docs/dba/tests/**'
       - '.github/workflows/pruebas-dba.yml'
+      - 'deploy/adrian/server/tramites-ctl'
 
 permissions:
   contents: read
@@ -37,6 +39,7 @@ jobs:
               exec gosu postgres bash -euo pipefail -c '\''
                 python3 /repo/docs/dba/tests/probar_historial_set_role.py --pg-bin /usr/lib/postgresql/18/bin
                 python3 /repo/docs/dba/tests/probar_logging_rotacion.py --pg-bin /usr/lib/postgresql/18/bin --bash /bin/bash
+                python3 /repo/docs/dba/tests/probar_respaldo_produccion.py --pg-bin /usr/lib/postgresql/18/bin --bash /bin/bash
                 cd /repo/docs/dba/scripts
                 sha256sum -c SHA256SUMS
                 for script in *.sh; do bash -n "$script"; done

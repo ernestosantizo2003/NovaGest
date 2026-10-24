@@ -105,27 +105,55 @@ backup_before_migration() {
   [[ "$ENVIRONMENT" == production ]] || return 0
   command -v pg_dump >/dev/null \
     || die "falta pg_dump en el servidor (sudo apt install postgresql-client); sin respaldo no se despliega a producción"
-  mkdir -p "$DIR/backups"
-  local stamp file
+  command -v pg_restore >/dev/null || die "falta pg_restore; no se puede verificar el respaldo"
+  command -v sha256sum >/dev/null || die "falta sha256sum; no se puede acreditar el respaldo"
+  [[ "$KEEP_PREDEPLOY_BACKUPS" =~ ^[1-9][0-9]*$ && ${#KEEP_PREDEPLOY_BACKUPS} -le 4 ]] \
+    || die "KEEP_PREDEPLOY_BACKUPS debe ser un entero positivo de hasta cuatro cifras"
+  [[ ! -L "$DIR/backups" ]] || die "backups no puede ser un enlace simbolico"
+  (umask 077; mkdir -p -- "$DIR/backups")
+  [[ -d "$DIR/backups" && -O "$DIR/backups" ]] || die "backups debe pertenecer al operador"
+  chmod 700 "$DIR/backups"
+  local stamp file tmp checksum
   stamp="$(date -u '+%Y%m%dT%H%M%SZ')"
-  file="$DIR/backups/pre-deploy-$stamp-$1.dump"
+  tmp="$(mktemp "$DIR/backups/pre-deploy-$stamp-$1-XXXXXXXX.dump.tmp")"
+  file="${tmp%.tmp}"
   log "Respaldo previo a la migración (Flyway corre al arrancar): $file"
   local host port
   host="$(envval DB_HOST)"; port="$(envval DB_PORT)"
   [[ "$host" == host.docker.internal ]] && host=127.0.0.1
-  # Respalda con el usuario de migraciones (dueño de las tablas); si no hay, con el de la app.
-  local user pass
+  # La app no puede leer el historial: no usarla como fallback de respaldo.
+  local user pass owner
   user="$(envval FLYWAY_USER)"; pass="$(envval FLYWAY_PASSWORD)"
-  [[ -n "$user" ]] || { user="$(envval DB_USER)"; pass="$(envval DB_PASSWORD)"; }
-  PGPASSWORD="$pass" pg_dump -Fc \
+  owner="$(envval FLYWAY_OWNER)"; owner="${owner:-tramites_prod_owner}"
+  [[ -n "$user" && -n "$pass" ]] \
+    || { rm -f -- "$tmp"; die "faltan credenciales del migrador para respaldar"; }
+  PGPASSWORD="$pass" pg_dump -Fc --role="$owner" \
     -h "${host:-127.0.0.1}" -p "${port:-5432}" \
-    -U "$user" -d "$(envval DB_NAME)" >"$file.tmp" \
-    || { rm -f "$file.tmp"; die "pg_dump falló; no se despliega sin respaldo"; }
-  mv "$file.tmp" "$file"; chmod 600 "$file"
+    -U "$user" -d "$(envval DB_NAME)" >"$tmp" \
+    || { rm -f -- "$tmp"; die "pg_dump falló; no se despliega sin respaldo"; }
+  # Leer todo el archivo (no solo el TOC) detecta truncamiento/descompresion fallida.
+  # No ejecuta SQL ni sustituye una restauracion aislada con ON_ERROR_STOP.
+  if [[ ! -s "$tmp" ]] || ! pg_restore --list "$tmp" >/dev/null \
+     || ! pg_restore --file=/dev/null "$tmp"; then
+    rm -f -- "$tmp"
+    die "respaldo ilegible o incompleto; no se despliega"
+  fi
+  checksum="$(sha256sum "$tmp")"; checksum="${checksum%% *}"
+  (umask 077; printf '%s  %s\n' "$checksum" "${file##*/}" >"$tmp.sha256")
+  mv -- "$tmp" "$file"; mv -- "$tmp.sha256" "$file.sha256"
+  (cd "$DIR/backups"; sha256sum -c -- "${file##*/}.sha256" >/dev/null) \
+    || die "la huella del respaldo publicado no coincide; no se despliega"
   # Conserva solo los últimos N respaldos previos a despliegue.
-  # (los nombres los genera este script: sin espacios)
-  # shellcheck disable=SC2012
-  ls -1t "$DIR"/backups/pre-deploy-*.dump 2>/dev/null | tail -n +$((KEEP_PREDEPLOY_BACKUPS + 1)) | xargs -r rm -f
+  # Conservar SIEMPRE el nuevo y los N-1 anteriores mas recientes por mtime.
+  local -a backups=()
+  local old listing
+  listing="$(find "$DIR/backups" -maxdepth 1 -type f -name 'pre-deploy-*.dump' \
+    ! -name "${file##*/}" -printf '%T@ %f\n' | LC_ALL=C sort -rn | cut -d ' ' -f2-)" \
+    || die "no se pudo comprobar la retencion de respaldos"
+  [[ -z "$listing" ]] || mapfile -t backups <<<"$listing"
+  for old in "${backups[@]:$((KEEP_PREDEPLOY_BACKUPS - 1))}"; do
+    rm -f -- "$DIR/backups/$old" "$DIR/backups/$old.sha256"
+  done
   LAST_BACKUP="$file"
 }
 

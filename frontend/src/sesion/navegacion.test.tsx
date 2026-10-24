@@ -5,7 +5,7 @@ import Menu from '../componentes/Menu'
 import { json, PERFIL_CIUDADANA, simularApi, tokens } from '../test/api-simulada'
 import { limpiarSesion, renderizarApp } from '../test/utilidades'
 import { guardarRenovacion } from './almacen'
-import { capacidadesDe } from './capacidades'
+import { accesosDe, capacidadesDe } from './capacidades'
 import { ITEMS_MENU, itemsVisibles, type ItemMenu } from './navegacion'
 import { ProveedorSesion } from './ProveedorSesion'
 
@@ -167,6 +167,48 @@ describe('panel según el rol', () => {
     expect(screen.queryByText(/bitácora/i)).not.toBeInTheDocument()
   })
 
+  it('cada acción del panel es un enlace a su pantalla', async () => {
+    guardarRenovacion('renovacion-guardada')
+    simularApi({
+      'POST /api/auth/refresh': () => json(tokens('1')),
+      'GET /api/usuarios/yo': () =>
+        json({ ...PERFIL_CIUDADANA, permisos: [...PERFIL_CIUDADANA.permisos, 'ingreso:leer'] }),
+    })
+
+    renderizarApp('/panel')
+
+    const nuevo = await screen.findByRole('link', { name: 'Crear y enviar trámites' })
+    expect(nuevo).toHaveAttribute('href', '/tramites/nuevo')
+    expect(
+      screen.getByRole('link', { name: 'Registrar y consultar tus ingresos' }),
+    ).toHaveAttribute('href', '/ingresos')
+  })
+
+  it('al gestor el panel le lleva a la bandeja y a los pagos pendientes', async () => {
+    guardarRenovacion('renovacion-guardada')
+    simularApi({
+      'POST /api/auth/refresh': () => json(tokens('1')),
+      'GET /api/usuarios/yo': () =>
+        json({
+          ...PERFIL_CIUDADANA,
+          roles: ['GESTOR'],
+          permisos: ['tramite:leer', 'tramite:editar', 'pago:editar'],
+          alcanceTotal: true,
+        }),
+    })
+
+    renderizarApp('/panel')
+
+    expect(await screen.findByRole('link', { name: /Revisar trámites/ })).toHaveAttribute(
+      'href',
+      '/bandeja',
+    )
+    expect(screen.getByRole('link', { name: 'Validar o rechazar pagos' })).toHaveAttribute(
+      'href',
+      '/pagos',
+    )
+  })
+
   it('un gestor ve la revisión de trámites y la validación de pagos', async () => {
     guardarRenovacion('renovacion-guardada')
     simularApi({
@@ -199,6 +241,17 @@ describe('panel según el rol', () => {
     renderizarApp('/panel')
 
     expect(await screen.findByText(/no tiene acciones habilitadas/)).toBeInTheDocument()
+  })
+
+  it('accesosDe no ofrece ninguna pantalla que el rol no tenga', () => {
+    const accesos = accesosDe({
+      ...PERFIL_CIUDADANA,
+      roles: ['AUDITOR'],
+      permisos: ['bitacora:leer', 'usuario:leer'],
+      alcanceTotal: true,
+    })
+
+    expect(accesos).toEqual([{ texto: 'Consultar la bitácora de auditoría', ruta: '/bitacora' }])
   })
 
   it('capacidadesDe distingue el alcance propio del total', () => {

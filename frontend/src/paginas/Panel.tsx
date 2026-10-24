@@ -1,14 +1,15 @@
+import { Link } from 'react-router-dom'
 import { useTitulo } from '../componentes/useTitulo'
 import Insignia from '../componentes/Insignia'
-import { capacidadesDe } from '../sesion/capacidades'
+import { accesosDe } from '../sesion/capacidades'
 import { useSesion } from '../sesion/contexto'
 
-/** Pantalla de entrada tras iniciar sesión. Los accesos a cada flujo se agregan con las tarjetas 33 a 40. */
+/** Pantalla de entrada tras iniciar sesión: cada acción que el rol permite es un acceso directo a su pantalla. */
 export default function Panel() {
   const { perfil } = useSesion()
   useTitulo('Mi panel')
   if (!perfil) return null
-  const capacidades = capacidadesDe(perfil)
+  const accesos = accesosDe(perfil)
 
   return (
     <>
@@ -23,10 +24,12 @@ export default function Panel() {
       </div>
       <section className="tarjeta" aria-labelledby="titulo-capacidades">
         <h2 id="titulo-capacidades">Lo que puedes hacer</h2>
-        {capacidades.length > 0 ? (
+        {accesos.length > 0 ? (
           <ul className="lista-capacidades">
-            {capacidades.map((texto) => (
-              <li key={texto}>{texto}</li>
+            {accesos.map(({ texto, ruta }) => (
+              <li key={texto}>
+                <Link to={ruta}>{texto}</Link>
+              </li>
             ))}
           </ul>
         ) : (

@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Tarjeta 41: resultados de Playwright
+test-results
+playwright-report
+blob-report
